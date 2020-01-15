@@ -1,4 +1,4 @@
-class MachineStack {
+class stack {
   constructor() {
     this.stack = [];
     this.length = 0;
@@ -30,33 +30,32 @@ class MachineStack {
 }
 
 class StateMachine {
-  constructor(config) {
-    this.id = config.id;
-    this.context = config.context;
-    this.currentState = config.initialState;
-    this.states = config.states;
-    this.actions = config.actions;
+  constructor(description) {
+    this.id = description.id;
+    this.currentState = description.initialState;
+    this.context = description.context;
+    this.states = description.states;
+    this.actions = description.actions;
   }
 
   transition(event, data) {
-    const machineCurrentState = this.states[this.currentState];
-    const handledEvent = machineCurrentState.on[event];
-    if (!handledEvent) {
-      throw new Error(`Event ${event} for state` +
-        ` ${this.currentState}  doesn't exists`);
+    const statusMachine = this.states[this.currentState];
+    const evently = statusMachine.on[event];
+    if (!evently) {
+      throw new Error('Error event');
     }
     return Promise.resolve(this)
       .then(() => {
-        if (machineCurrentState.hasOwnProperty('onExit')) {
+        if (statusMachine.hasOwnProperty('onExit')) {
           this.callActions("onExit", data)
         }
       })
       .then(() => {
-        const service = handledEvent["service"];
+        const service = evently["service"];
         if (service) {
           this.callService(service, data)
         } else {
-          let targetState = this.getTargetState(handledEvent);
+          let targetState = this.targetState(evently);
           this.setState(targetState);
         }
         return this;
@@ -66,22 +65,17 @@ class StateMachine {
       })
   }
 
-  getTargetState(handledEvent) {
-    if (handledEvent.hasOwnProperty("target")) {
-      return handledEvent["target"];
+  targetState(evently) {
+    if (evently.hasOwnProperty("target")) {
+      return evently["target"];
     } else {
-      throw new Error(`Target state for machine` + ` ${this.id} is not specified.`);
+      throw new Error('Target Eroor');
     }
-  }
-
-  setContext(newContext) {
-    Object.assign(this.context, newContext);
   }
 
   setState(targetState) {
     if (!this.states.hasOwnProperty(targetState)) {
-      throw new Error(`Target state "${targetState}"` +
-        ` for machine ${this.id} is incorrect.`);
+      throw new Error("Target state Error");
     }
     this.currentState = targetState;
     if (this.states[targetState].hasOwnProperty("onEntry")) {
@@ -89,26 +83,15 @@ class StateMachine {
     }
   }
 
-  getActionByItsName(actionName) {
-    if (!this.actions.hasOwnProperty(actionName)) {
-      throw new Error(`Action "${action}" is unavailable`);
-    }
-    return this.actions[actionName];
+  setContext(newContext) {
+    Object.assign(this.context, newContext);
   }
-
-
-  callService(service, data) {
-    StateMachine.machinesStack.push(this);
-    service(data);
-    StateMachine.machinesStack.pop();
-  }
-
 
   callActions(actionName, data) {
     const actionsForCall = [];
     const action = this.states[this.currentState][actionName];
     if (typeof action == "string") {
-      actionsForCall.push(this.getActionByItsName(action))
+      actionsForCall.push(this.funcActionName(action))
     } else if (typeof action == "function") {
       actionsForCall.push(action)
     } else {
@@ -116,7 +99,7 @@ class StateMachine {
         if (typeof act == "function") {
           actionsForCall.push(act)
         } else if (typeof act == "string") {
-          actionsForCall.push(this.getActionByItsName(act));
+          actionsForCall.push(this.funcActionName(act));
         }
       }
     }
@@ -126,13 +109,26 @@ class StateMachine {
       StateMachine.machinesStack.pop();
     }
   }
+
+  funcActionName(actionName) {
+    if (!this.actions.hasOwnProperty(actionName)) {
+      throw new Error("Action Error");
+    }
+    return this.actions[actionName];
+  }
+
+  callService(service, data) {
+    StateMachine.machinesStack.push(this);
+    service(data);
+    StateMachine.machinesStack.pop();
+  }
 }
 
-StateMachine.machinesStack = new MachineStack();
-
-function machine(config) {
-  return new StateMachine(config);
+function machine(description) {
+  return new StateMachine(description);
 }
+
+StateMachine.machinesStack = new stack();
 
 function useContext() {
   let machine = StateMachine.machinesStack.getTopElement();
@@ -143,3 +139,69 @@ function useState() {
   let machine = StateMachine.machinesStack.getTopElement();
   return [machine.currentState, (arg) => machine.setState(arg)]
 }
+
+// machine — создает инстанс state machine (фабрика)
+const vacancyMachine = machine({
+  // У каждого может быть свой id
+  id: "vacancy",
+  // начальное состояние
+  initialState: "notResponded",
+  // дополнительный контекст (payload)
+  context: { id: 123 },
+  // Граф состояний и переходов между ними
+  states: {
+    // Каждое поле — это возможное состоение
+    responded: {
+      // action, который нужно выполнить при входе в это состояние. Можно задавать массивом, строкой или функцией
+      onEntry: "onStateEntry"
+    },
+    notResponded: {
+      // action, который нужно выполнить при выходе из этого состояния. Можно задавать массивом, строкой или функцией
+      onExit() {
+        console.log("we are leaving notResponded state");
+      },
+      // Блок описания транзакций
+      on: {
+        // Транзакция
+        RESPOND: {
+          // упрощенный сервис, вызываем при транзакции
+          service: event => {
+            // Позволяет получить текущий контекст и изменить его
+            const [contex, setContext] = useContext();
+            // Позволяет получить текущий стейт и изменить его
+            const [state, setState] = useState();
+            // Поддерживаются асинхронные действия
+            Promise.resolve("result").then(() => {
+              // меняем состояние
+              //     console.log("In promise");
+              setState('responded');
+              // Мержим контекст
+              setContext({ completed: true }); // {id: 123, comleted: true}
+            });
+          }
+          // Если не задан сервис, то просто переводим в заданный target, иначе выполняем сервис.
+          //target: 'responded',
+        }
+      }
+    }
+  },
+  // Раздел описание экшенов
+  actions: {
+    onStateEntry: function (event) {
+      const [state] = useState();
+      console.log("now state is " + state);
+    }
+    /*makeResponse: (event) => {
+			// both sync and async actions
+			const [contex, setContext] = useContext()			
+			window.fetch({method: 'post', data: {resume: event.resume, vacancyId: context.id} })
+		}*/
+  }
+});
+
+// Пример использования StateMachine
+vacancyMachine.transition("RESPOND", {
+  resume: { name: "Vasya", lastName: "Pupkin" }
+});
+// vacancyMachine.transition('RESPONDA', {resume: {name: 'Vasya', lastName: 'Pupkin'}});
+setTimeout(() => console.log("Final vacancy machine: ", vacancyMachine), 0);
